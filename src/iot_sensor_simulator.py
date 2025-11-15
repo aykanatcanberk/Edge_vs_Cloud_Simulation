@@ -1,5 +1,5 @@
 """
-iot_sensor_simulator.py
+02_iot_sensor_simulator.py
 IoT Sensör Düğümleri Simülasyonu (ESP32 Benzeri)
 Bu modül bağımsız çalışmaz, 05_main_analysis.py tarafından kullanılır
 """
