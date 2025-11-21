@@ -24,26 +24,24 @@ def generate_turbofan_data():
     np.random.seed(42)
     
     # Parametreler
-    num_cycles = 200
     num_engines = 4
-    
+    num_cycles = 2500         # ≈ 10.000 veri
+    # num_cycles = 5000       # ≈ 20.000 veri (istersen bunu aç)
+
     data_list = []
     
     print(f"\n{num_engines} motor için {num_cycles} döngülük veri oluşturuluyor...")
     
     for engine_id in range(1, num_engines + 1):
         for cycle in range(1, num_cycles + 1):
-            # Zamanla artan degradasyon faktörü
             degradation_factor = cycle / num_cycles
             
-            # Sensör değerleri (degradasyon ile artış)
             temp_sensor1 = 520 + degradation_factor * 40 + np.random.normal(0, 2)
             temp_sensor2 = 640 + degradation_factor * 50 + np.random.normal(0, 3)
             pressure = 14.5 + degradation_factor * 2 + np.random.normal(0, 0.3)
             vibration = 0.02 + degradation_factor * 0.08 + np.random.normal(0, 0.005)
             rpm = 2300 + degradation_factor * 200 + np.random.normal(0, 20)
             
-            # Sağlık göstergesi (100'den başlayıp azalır)
             health_indicator = 100 - (degradation_factor * 100)
             
             data_list.append({
@@ -59,7 +57,6 @@ def generate_turbofan_data():
     
     df = pd.DataFrame(data_list)
     
-    # Veri setini kaydet
     filepath = 'data/turbofan_sensor_data.csv'
     df.to_csv(filepath, index=False)
     print(f"✓ Veri seti kaydedildi: {filepath}")
@@ -119,14 +116,11 @@ def visualize_data(df):
         ax.legend(loc='best', fontsize=9)
         ax.grid(True, alpha=0.3)
         
-        # Kritik eşik çizgisi (sadece sağlık göstergesi için)
         if col == 'health_indicator':
-            ax.axhline(y=30, color='red', linestyle='--', 
-                      linewidth=2, label='Kritik Eşik', alpha=0.7)
-            ax.legend(loc='best', fontsize=9)
+            ax.axhline(y=30, color='red', linestyle='--', linewidth=2, alpha=0.7)
     
     plt.tight_layout()
-    
+
     output_path = 'output/sensor_data_analysis.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"✓ Görselleştirme kaydedildi: {output_path}")
@@ -134,14 +128,12 @@ def visualize_data(df):
     plt.close()
 
 def main():
-    """Ana fonksiyon"""
     print("\n" + "="*70)
     print("ADIM 1: VERİ HAZIRLAMA VE KEŞFETME")
     print("="*70)
     
     create_directories()
     
-    # Veri seti 
     df = generate_turbofan_data()
     analyze_data(df)
     visualize_data(df)
@@ -149,8 +141,7 @@ def main():
     print("\n" + "="*70)
     print("✓ ADIM 1 TAMAMLANDI")
     print("="*70)
-    print("\nSonraki adım: python src/iot_sensor_simulator.py")
-    print()
+    print("\nSonraki adım: python src/iot_sensor_simulator.py\n")
 
 if __name__ == "__main__":
     main()

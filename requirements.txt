@@ -5,3 +5,4 @@ seaborn
 paho-mqtt
 flask
 requests
+scikit-learn
