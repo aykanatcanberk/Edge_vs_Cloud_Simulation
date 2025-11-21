@@ -1,6 +1,7 @@
 """
 06_mqtt_edge_device.py
-MQTT Protokolü ile AI Destekli Kenar Bilişim Cihazı (GÜNCELLENDİ)
+MQTT Protokolü ile Yüksek Performanslı AI Kenar Cihazı
+(Random Forest Entegrasyonu)
 """
 
 import json
@@ -14,10 +15,6 @@ from datetime import datetime
 import paho.mqtt.client as mqtt
 
 class MQTTEdgeDevice:
-    """
-    AI destekli MQTT kenar bilişim cihazı
-    """
-    
     def __init__(self, device_id='edge_device_ai', broker='broker.hivemq.com', port=1883):
         self.device_id = device_id
         self.broker = broker
@@ -33,19 +30,18 @@ class MQTTEdgeDevice:
         # AI Modeli
         self.ai_enabled = False
         self.model = None
-        self.scaler = None
         self.load_ai_models()
         
         self.sensor_history = {}
         self.window_size = 10
         
+        # Sabit Eşikler (Yedek Güvenlik)
         self.thresholds = {
             'temperature_1': 560.0,
             'vibration': 0.12,
             'health': 30.0
         }
         
-        # Metrikler (Detaylandırıldı)
         self.metrics = {
             'total_received': 0,
             'ai_anomalies': 0,
@@ -59,17 +55,16 @@ class MQTTEdgeDevice:
 
     def load_ai_models(self):
         try:
-            if os.path.exists('models/anomaly_detector.pkl'):
-                with open('models/anomaly_detector.pkl', 'rb') as f:
+            model_path = 'models/anomaly_detector.pkl'
+            if os.path.exists(model_path):
+                with open(model_path, 'rb') as f:
                     self.model = pickle.load(f)
-                with open('models/scaler.pkl', 'rb') as f:
-                    self.scaler = pickle.load(f)
                 self.ai_enabled = True
-                print(f"[{self.device_id}] ✓ AI Modeli Yüklendi (Isolation Forest)")
+                print(f"[{self.device_id}] ✓ GÜÇLÜ AI Modeli Yüklendi (Random Forest)")
             else:
                 print(f"[{self.device_id}] ! AI Modeli bulunamadı.")
         except Exception as e:
-            print(f"Model hatası: {e}")
+            print(f"Model yükleme hatası: {e}")
 
     def connect(self):
         try:
@@ -101,11 +96,12 @@ class MQTTEdgeDevice:
         node_id = sensor_data.get('node_id')
         measurements = sensor_data.get('measurements', {})
         
-        # --- 1. AI ANOMALİ TESPİTİ ---
+        # --- 1. AI ANOMALİ TESPİTİ (RANDOM FOREST) ---
         ai_anomaly = False
-        ai_score = 0.0
+        confidence = 0.0
         
         if self.ai_enabled:
+            # Random Forest sıralamayı önemser, eğitimdeki sırayla aynı olmalı!
             features = [
                 measurements.get('temperature_1', 0),
                 measurements.get('temperature_2', 0),
@@ -115,34 +111,38 @@ class MQTTEdgeDevice:
             ]
             
             try:
-                features_scaled = self.scaler.transform([features])
-                prediction = self.model.predict(features_scaled)[0]
-                ai_score = self.model.decision_function(features_scaled)[0]
+                # Random Forest için reshape gerekir: [[f1, f2, ...]]
+                features_reshaped = np.array(features).reshape(1, -1)
                 
-                if prediction == -1:
+                # Tahmin: 0=Normal, 1=Arıza
+                prediction = self.model.predict(features_reshaped)[0]
+                # Olasılık (Arıza olma ihtimali)
+                probs = self.model.predict_proba(features_reshaped)
+                confidence = probs[0][1]  # 1 sınıfının (Arıza) olasılığı
+                
+                if prediction == 1:
                     ai_anomaly = True
                     self.metrics['ai_anomalies'] += 1
-                    # GÖRSEL ÇIKTI EKLENDİ
-                    print(f"   🤖 [AI TESPİTİ] Node {node_id} -> Anomali Skoru: {ai_score:.4f}")
-            except:
-                pass
+                    # Arıza ihtimali yüksekse konsola bas
+                    print(f"   🤖 [AI UYARISI] Node {node_id} -> Arıza Olasılığı: %{confidence*100:.1f}")
+            except Exception as e:
+                print(f"AI Hata: {e}")
 
-        # --- 2. KURAL TABANLI TESPİT ---
+        # --- 2. KURAL TABANLI KONTROL ---
         rule_anomalies = self.check_rules(measurements, sensor_data.get('health', 100))
         if rule_anomalies:
             self.metrics['rule_anomalies'] += len(rule_anomalies)
-            # GÖRSEL ÇIKTI EKLENDİ
-            print(f"   📏 [KURAL TESPİTİ] Node {node_id} -> {rule_anomalies[0]['type']}")
+            print(f"    [KURAL] Node {node_id} -> Eşik Aşıldı")
 
-        # --- 3. KARAR BİRLEŞTİRME ---
+        # --- 3. BİRLEŞTİRME ---
         final_anomalies = rule_anomalies
         if ai_anomaly:
             final_anomalies.append({
-                'type': 'AI_DETECTED_PATTERN',
-                'sensor': 'isolation_forest',
-                'value': float(ai_score),
-                'threshold': 0,
-                'severity': 'WARNING'
+                'type': 'AI_DETECTED_FAILURE',
+                'sensor': 'RandomForest',
+                'value': float(confidence),
+                'threshold': 0.5,
+                'severity': 'CRITICAL' if confidence > 0.8 else 'WARNING'
             })
 
         # İşlem süresi
@@ -159,9 +159,9 @@ class MQTTEdgeDevice:
     def check_rules(self, measurements, health):
         anomalies = []
         if measurements.get('temperature_1', 0) > self.thresholds['temperature_1']:
-            anomalies.append({'type': 'THRESHOLD_TEMP', 'sensor': 'temp1', 'severity': 'WARNING', 'value': measurements['temperature_1']})
+            anomalies.append({'type': 'THRESHOLD_TEMP', 'severity': 'WARNING'})
         if measurements.get('vibration', 0) > self.thresholds['vibration']:
-            anomalies.append({'type': 'THRESHOLD_VIB', 'sensor': 'vibration', 'severity': 'CRITICAL', 'value': measurements['vibration']})
+            anomalies.append({'type': 'THRESHOLD_VIB', 'severity': 'CRITICAL'})
         return anomalies
 
     def control_actuators(self, node_id, anomalies):
