@@ -1,7 +1,7 @@
 """
 06_mqtt_edge_device.py
-MQTT Protokolü ile Yüksek Performanslı AI Kenar Cihazı
-(Random Forest Entegrasyonu)
+Yapay Zeka Destekli Kenar Bilişim Cihazı (DÜZELTİLMİŞ VERSİYON)
+Proje 10: Yerel İşleme ve Otonom Karar Mekanizması
 """
 
 import json
@@ -15,7 +15,7 @@ from datetime import datetime
 import paho.mqtt.client as mqtt
 
 class MQTTEdgeDevice:
-    def __init__(self, device_id='edge_device_ai', broker='broker.hivemq.com', port=1883):
+    def __init__(self, device_id='edge_pi_01', broker='broker.hivemq.com', port=1883):
         self.device_id = device_id
         self.broker = broker
         self.port = port
@@ -24,45 +24,44 @@ class MQTTEdgeDevice:
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
         
+        # 1. Konu Başlıkları
         self.sensor_topic = "iot/sensors/+/data"
         self.cloud_topic = "iot/cloud/alerts"
+        self.actuator_topic = "iot/actuators/+/command"
         
-        # AI Modeli
+        # 2. Yapay Zeka Modelini Yükle
         self.ai_enabled = False
         self.model = None
-        self.load_ai_models()
+        self.load_ai_brain()
         
-        self.sensor_history = {}
-        self.window_size = 10
+        # 3. Sabit Kurallar
+        self.thresholds = {'temperature_1': 560.0, 'vibration': 0.12}
         
-        # Sabit Eşikler (Yedek Güvenlik)
-        self.thresholds = {
-            'temperature_1': 560.0,
-            'vibration': 0.12,
-            'health': 30.0
-        }
-        
+        # 4. Performans Metrikleri (Analiz dosyasıyla uyumlu isimler)
         self.metrics = {
             'total_received': 0,
             'ai_anomalies': 0,
-            'rule_anomalies': 0,
-            'cloud_messages_sent': 0,
-            'local_decisions': 0,
-            'processing_times': deque(maxlen=1000)
+            'cloud_messages_sent': 0,  
+            'local_decisions': 0,     
+            'processing_times': []
         }
-        
         self.connected = False
 
-    def load_ai_models(self):
+    def load_ai_brain(self):
+        """Eğitilmiş makine öğrenmesi modelini yükler"""
         try:
+            # Model dosya yolu kontrolü 
             model_path = 'models/anomaly_detector.pkl'
+            if not os.path.exists(model_path):
+                model_path = '../models/anomaly_detector.pkl'
+            
             if os.path.exists(model_path):
                 with open(model_path, 'rb') as f:
                     self.model = pickle.load(f)
                 self.ai_enabled = True
-                print(f"[{self.device_id}] ✓ GÜÇLÜ AI Modeli Yüklendi (Random Forest)")
+                print(f"[{self.device_id}]  AI Modeli Yüklendi ve Aktif!")
             else:
-                print(f"[{self.device_id}] ! AI Modeli bulunamadı.")
+                print(f"[{self.device_id}]  Model bulunamadı, sadece kural tabanlı çalışacak.")
         except Exception as e:
             print(f"Model yükleme hatası: {e}")
 
@@ -70,11 +69,8 @@ class MQTTEdgeDevice:
         try:
             self.client.connect(self.broker, self.port, 60)
             self.client.loop_start()
-            timeout = 10
-            start = time.time()
-            while not self.connected and (time.time() - start) < timeout:
-                time.sleep(0.1)
-            return self.connected
+            time.sleep(1)
+            return True
         except:
             return False
 
@@ -86,115 +82,109 @@ class MQTTEdgeDevice:
     def on_message(self, client, userdata, msg):
         try:
             payload = json.loads(msg.payload.decode())
-            self.process_sensor_data(payload)
+            self.process_data_at_edge(payload)
         except:
             pass
 
-    def process_sensor_data(self, sensor_data):
+    def process_data_at_edge(self, data):
+        """
+        PROJE ÇEKİRDEĞİ: Veri buluta gitmeden burada işleniyor.
+        """
         start_time = time.time()
         self.metrics['total_received'] += 1
-        node_id = sensor_data.get('node_id')
-        measurements = sensor_data.get('measurements', {})
+        node_id = data.get('node_id')
+        measurements = data.get('measurements', {})
         
-        # --- 1. AI ANOMALİ TESPİTİ (RANDOM FOREST) ---
-        ai_anomaly = False
-        confidence = 0.0
-        
-        if self.ai_enabled:
-            # Random Forest sıralamayı önemser, eğitimdeki sırayla aynı olmalı!
-            features = [
-                measurements.get('temperature_1', 0),
-                measurements.get('temperature_2', 0),
-                measurements.get('pressure', 0),
-                measurements.get('vibration', 0),
-                measurements.get('rpm', 0)
-            ]
-            
-            try:
-                # Random Forest için reshape gerekir: [[f1, f2, ...]]
-                features_reshaped = np.array(features).reshape(1, -1)
-                
-                # Tahmin: 0=Normal, 1=Arıza
-                prediction = self.model.predict(features_reshaped)[0]
-                # Olasılık (Arıza olma ihtimali)
-                probs = self.model.predict_proba(features_reshaped)
-                confidence = probs[0][1]  # 1 sınıfının (Arıza) olasılığı
-                
-                if prediction == 1:
-                    ai_anomaly = True
-                    self.metrics['ai_anomalies'] += 1
-                    # Arıza ihtimali yüksekse konsola bas
-                    print(f"   🤖 [AI UYARISI] Node {node_id} -> Arıza Olasılığı: %{confidence*100:.1f}")
-            except Exception as e:
-                print(f"AI Hata: {e}")
-
-        # --- 2. KURAL TABANLI KONTROL ---
-        rule_anomalies = self.check_rules(measurements, sensor_data.get('health', 100))
-        if rule_anomalies:
-            self.metrics['rule_anomalies'] += len(rule_anomalies)
-            print(f"    [KURAL] Node {node_id} -> Eşik Aşıldı")
-
-        # --- 3. BİRLEŞTİRME ---
-        final_anomalies = rule_anomalies
-        if ai_anomaly:
-            final_anomalies.append({
-                'type': 'AI_DETECTED_FAILURE',
-                'sensor': 'RandomForest',
-                'value': float(confidence),
-                'threshold': 0.5,
-                'severity': 'CRITICAL' if confidence > 0.8 else 'WARNING'
-            })
-
-        # İşlem süresi
-        self.metrics['processing_times'].append((time.time() - start_time) * 1000)
-
-        # Eylem
-        if final_anomalies:
-            self.control_actuators(node_id, final_anomalies)
-            self.send_to_cloud(sensor_data, final_anomalies)
-            self.metrics['local_decisions'] += 1
-        elif self.metrics['total_received'] % 20 == 0:
-            self.send_summary_to_cloud(sensor_data)
-
-    def check_rules(self, measurements, health):
         anomalies = []
+        
+        # --- A. YAPAY ZEKA ANALİZİ ---
+        if self.ai_enabled:
+            try:
+                features = np.array([
+                    measurements.get('temperature_1', 0),
+                    measurements.get('temperature_2', 0),
+                    measurements.get('pressure', 0),
+                    measurements.get('vibration', 0),
+                    measurements.get('rpm', 0)
+                ]).reshape(1, -1)
+                
+                prediction = self.model.predict(features)[0]
+                
+                if prediction == 1: # Arıza
+                    probs = self.model.predict_proba(features)
+                    confidence = probs[0][1]
+                    
+                    if confidence > 0.7:
+                        self.metrics['ai_anomalies'] += 1
+                        anomalies.append({
+                            'type': 'AI_DETECTED_ANOMALY',
+                            'confidence': f"%{confidence*100:.1f}",
+                            'severity': 'CRITICAL'
+                        })
+
+                         #print(f"    [AI] Node {node_id} Anomali! (%{confidence*100:.0f})")
+            except Exception as e:
+                print(f"AI Hatası: {e}")
+
+        # --- B. KURAL TABANLI ANALİZ ---
         if measurements.get('temperature_1', 0) > self.thresholds['temperature_1']:
-            anomalies.append({'type': 'THRESHOLD_TEMP', 'severity': 'WARNING'})
-        if measurements.get('vibration', 0) > self.thresholds['vibration']:
-            anomalies.append({'type': 'THRESHOLD_VIB', 'severity': 'CRITICAL'})
-        return anomalies
+            anomalies.append({'type': 'HIGH_TEMP', 'severity': 'WARNING'})
 
-    def control_actuators(self, node_id, anomalies):
-        critical = any(a['severity'] == 'CRITICAL' for a in anomalies)
-        action = 'EMERGENCY_STOP' if critical else 'MAINTENANCE_ALERT'
-        msg = {'node_id': node_id, 'action': action, 'timestamp': datetime.now().isoformat()}
-        self.client.publish(f"iot/actuators/{node_id}/command", json.dumps(msg))
+        # İşlem süresini kaydet
+        proc_time = (time.time() - start_time) * 1000
+        self.metrics['processing_times'].append(proc_time)
 
-    def send_to_cloud(self, sensor_data, anomalies):
+        # --- C. KARAR VE EYLEM ---
+        if anomalies:
+            self.trigger_actuator(node_id, anomalies)
+            self.send_alert_to_cloud(data, anomalies)
+        
+        # Normal durumda veri azaltma (Heartbeat)
+        elif self.metrics['total_received'] % 20 == 0:
+            self.send_summary_to_cloud(data)
+
+    def trigger_actuator(self, node_id, anomalies):
+        """Yerel aktüatörleri tetikler"""
+        action = "EMERGENCY_STOP" if any(a['severity'] == 'CRITICAL' for a in anomalies) else "ACTIVATE_FAN"
+        
         msg = {
-            'device_id': self.device_id,
-            'node_id': sensor_data.get('node_id'),
-            'alert_type': 'ANOMALY',
+            'target_node': node_id,
+            'action': action,
+            'timestamp': datetime.now().isoformat(),
+            'source': 'EDGE_COMPUTING_UNIT'
+        }
+        self.client.publish(f"iot/actuators/{node_id}/command", json.dumps(msg))
+        self.metrics['local_decisions'] += 1 
+
+    def send_alert_to_cloud(self, raw_data, anomalies):
+        """Sadece önemli veriyi gönder"""
+        msg = {
+            'type': 'ANOMALY_REPORT',
+            'node_id': raw_data.get('node_id'),
             'anomalies': anomalies,
             'timestamp': datetime.now().isoformat()
         }
         self.client.publish(self.cloud_topic, json.dumps(msg))
-        self.metrics['cloud_messages_sent'] += 1
+        self.metrics['cloud_messages_sent'] += 1 
 
-    def send_summary_to_cloud(self, sensor_data):
-        msg = {'device_id': self.device_id, 'alert_type': 'SUMMARY', 'node_id': sensor_data.get('node_id')}
+    def send_summary_to_cloud(self, raw_data):
+        """Periyodik özet"""
+        msg = {
+            'type': 'STATUS_SUMMARY',
+            'node_id': raw_data.get('node_id'),
+            'avg_health': raw_data.get('health')
+        }
         self.client.publish(self.cloud_topic, json.dumps(msg))
-        self.metrics['cloud_messages_sent'] += 1
+        self.metrics['cloud_messages_sent'] += 1 
+
+    def get_statistics(self):
+        stats = self.metrics.copy()
+        if stats['processing_times']:
+            stats['avg_proc_time'] = statistics.mean(stats['processing_times'])
+        else:
+            stats['avg_proc_time'] = 0
+        return stats
 
     def disconnect(self):
         self.client.loop_stop()
         self.client.disconnect()
-
-    def get_statistics(self):
-        stats = self.metrics.copy()
-        stats['anomalies_detected'] = stats['ai_anomalies'] + stats['rule_anomalies']
-        if self.metrics['processing_times']:
-            stats['avg_processing_time'] = statistics.mean(self.metrics['processing_times'])
-        else:
-            stats['avg_processing_time'] = 0
-        return stats

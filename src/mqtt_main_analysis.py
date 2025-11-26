@@ -1,199 +1,168 @@
 """
 09_mqtt_main_analysis.py 
-MQTT Protokolü ile Kenar Bilişim vs Bulut Karşılaştırması (Doğruluk Analizli)
+YOĞUN YÜK ALTINDA KENAR BİLİŞİM SİMÜLASYONU
+(Canlı Veri + 5000 Döngü + AI Analizi)
 """
 
 import time
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
-from datetime import datetime
-
-# Modülleri import et
 from mqtt_sensor_simulator import create_mqtt_sensors
 from mqtt_edge_device import MQTTEdgeDevice
 from mqtt_cloud_platform import CloudPlatform
-from iot_sensor_simulator import load_sensor_data
 
 class MQTTSystemSimulation:
-    def __init__(self, num_cycles=30, broker='broker.hivemq.com', port=1883):
+    def __init__(self, num_cycles=5000, num_sensors=4):
         self.num_cycles = num_cycles
-        self.broker = broker
-        self.port = port
+        self.num_sensors = num_sensors
+        self.broker = 'broker.hivemq.com'
+        self.port = 1883
         
-        # Gerçek zamanlı doğruluk takibi için değişkenler
-        self.accuracy_metrics = {
-            'true_positives': 0,  # Arızayı bildi
-            'false_positives': 0, # Sağlam motora arıza dedi
-            'true_negatives': 0,  # Sağlamı bildi
-            'false_negatives': 0  # Arızayı kaçırdı
+        # Sonuçları sakla
+        self.results = {
+            'edge': {'latency': [], 'bandwidth': 0, 'decisions': 0},
+            'cloud': {'latency': [], 'bandwidth': 0, 'decisions': 0}
         }
-        
-        self.edge_metrics = {
-            'latencies': [],
-            'data_sent_to_cloud': 0,
-            'total_data_points': 0,
-            'anomalies_detected': 0,
-            'ai_anomalies': 0,
-            'rule_anomalies': 0,
-            'local_decisions': 0
-        }
-        
-        self.cloud_only_metrics = {
-            'latencies': [],
-            'data_sent_to_cloud': 0,
-            'total_data_points': 0,
-            'anomalies_detected': 0
-        }
-    
-    def evaluate_prediction(self, node, is_anomaly_detected):
+
+    def run_scenario(self, mode='edge'):
         """
-        Simülasyon sırasında modelin kararını doğrula
-        Varsayım: Sağlık < 60 ise gerçek bir arızadır.
+        Tek bir fonksiyonla iki senaryoyu da çalıştırır.
+        mode: 'edge' veya 'cloud'
         """
-        # Sensörün o anki gerçek sağlık durumu (Veri setinden okuyoruz)
-        try:
-            current_row = node.data_source.iloc[node.current_cycle - 1]
-            actual_health = float(current_row['health_indicator'])
-            is_actual_failure = actual_health <= 60.0
-            
-            if is_actual_failure and is_anomaly_detected:
-                self.accuracy_metrics['true_positives'] += 1
-            elif not is_actual_failure and not is_anomaly_detected:
-                self.accuracy_metrics['true_negatives'] += 1
-            elif not is_actual_failure and is_anomaly_detected:
-                self.accuracy_metrics['false_positives'] += 1
-            elif is_actual_failure and not is_anomaly_detected:
-                self.accuracy_metrics['false_negatives'] += 1
-        except:
-            pass
-
-    def simulate_edge_mqtt_architecture(self):
+        scenario_name = "KENAR BİLİŞİM (EDGE AI)" if mode == 'edge' else "GELENEKSEL BULUT"
         print("\n" + "="*70)
-        print("MQTT KENAR BİLİŞİM MİMARİSİ (AI DOĞRULUK TESTLİ)")
+        print(f"SENARYO BAŞLATILIYOR: {scenario_name}")
+        print(f"Hedef: {self.num_cycles} Veri Paketi | Sensör Sayısı: {self.num_sensors}")
         print("="*70)
         
-        sensor_data = load_sensor_data()
-        if sensor_data is None: return False
+        # 1. Bileşenleri Başlat
+        # Not: create_mqtt_sensors artık veri seti istemiyor, canlı üretiyor.
+        sensors = create_mqtt_sensors(self.num_sensors, self.broker, self.port)
         
-        sensor_nodes = create_mqtt_sensors(sensor_data, num_cycles=self.num_cycles, broker=self.broker, port=self.port)
-        edge_device = MQTTEdgeDevice(device_id='edge_device_mqtt', broker=self.broker, port=self.port)
-        cloud = CloudPlatform(platform_id='cloud_mqtt', broker=self.broker, port=self.port)
+        if mode == 'edge':
+            edge = MQTTEdgeDevice(device_id='edge_sim', broker=self.broker)
+            edge.connect()
+            # Cloud sadece uyarıları dinler
+            cloud = CloudPlatform(platform_id='cloud_listener', broker=self.broker)
+            cloud.connect()
+        else:
+            # Cloud her şeyi dinler
+            cloud = CloudPlatform(platform_id='cloud_main', broker=self.broker)
+            cloud.connect()
+            cloud.client.subscribe("iot/sensors/+/data")
         
-        cloud.connect(); time.sleep(1)
-        edge_device.connect(); time.sleep(1)
-        for node in sensor_nodes: node.connect()
-        time.sleep(2)
+        for s in sensors: s.connect()
+        time.sleep(2) # Bağlantıların oturması için
         
-        print("\n--- Veri Akışı ve Gerçek Zamanlı Analiz ---")
+        print("\n Yoğun veri akışı başladı...")
+        start_time = time.time()
         
-        for cycle in range(self.num_cycles):
-            if cycle % 10 == 0: print(f"Döngü {cycle + 1}/{self.num_cycles} işleniyor...")
-            
-            for node in sensor_nodes:
-                # 1. Önceki anomali sayısını kaydet
-                prev_anomalies = edge_device.metrics['ai_anomalies'] + edge_device.metrics['rule_anomalies']
+        processed_count = 0
+        
+        # --- SİMÜLASYON DÖNGÜSÜ ---
+        while processed_count < self.num_cycles:
+            for sensor in sensors:
+                if processed_count >= self.num_cycles: break
                 
-                # 2. Veriyi gönder
-                success = node.read_and_publish()
-                
-                # 3. Gecikme simülasyonu
-                time.sleep(0.1) 
-                
-                if success:
-                    self.edge_metrics['total_data_points'] += 1
-                    sensor_to_edge_latency = np.random.uniform(5, 15)
-                    edge_processing = np.random.uniform(2, 5)
-                    self.edge_metrics['latencies'].append(sensor_to_edge_latency + edge_processing)
+                # A. Veri Üretimi ve Gönderimi
+                if sensor.read_and_publish():
+                    processed_count += 1
                     
-                    # 4. Model o an anomali buldu mu?
-                    curr_anomalies = edge_device.metrics['ai_anomalies'] + edge_device.metrics['rule_anomalies']
-                    is_detected = curr_anomalies > prev_anomalies
+                    # B. Gecikme Simülasyonu
+                    if mode == 'edge':
+                        # Sensör -> Edge (LAN: Hızlı, 2-10ms) + AI İşleme (3-15ms)
+                        lat = np.random.uniform(2, 10) + np.random.uniform(3, 15)
+                    else:
+                        # Sensör -> Cloud (WAN: Yavaş, 60-200ms) + Cloud İşleme (20-50ms)
+                        lat = np.random.uniform(60, 200) + np.random.uniform(20, 50)
                     
-                    # 5. Doğruluk kontrolü yap
-                    self.evaluate_prediction(node, is_detected)
+                    self.results[mode]['latency'].append(lat)
+                    
+                    # İlerleme Çubuğu (Her 500 veride bir)
+                    if processed_count % 500 == 0:
+                        print(f"   [{mode.upper()}] İlerleme: {processed_count}/{self.num_cycles} veri işlendi...")
             
-        print("\nSonuçlar toplanıyor...")
-        time.sleep(2)
-        
-        edge_stats = edge_device.get_statistics()
-        self.edge_metrics.update(edge_stats)
-        
-        for node in sensor_nodes: node.disconnect()
-        edge_device.disconnect()
-        cloud.disconnect()
-        return True
-    
-    def simulate_cloud_only_mqtt(self):
-        print("\n" + "="*70)
-        print("MQTT BULUT MERKEZLİ MİMARİ")
-        print("="*70)
-        sensor_data = load_sensor_data()
-        sensor_nodes = create_mqtt_sensors(sensor_data, num_cycles=self.num_cycles, broker=self.broker, port=self.port)
-        cloud = CloudPlatform(platform_id='cloud_direct', broker=self.broker, port=self.port)
-        
-        cloud.connect()
-        cloud.client.subscribe("iot/sensors/+/data")
-        time.sleep(2)
-        for node in sensor_nodes: node.connect()
-        
-        print("Veriler doğrudan buluta gönderiliyor...")
-        for cycle in range(self.num_cycles):
-            for node in sensor_nodes:
-                if node.read_and_publish():
-                    self.cloud_only_metrics['total_data_points'] += 1
-                    self.cloud_only_metrics['data_sent_to_cloud'] += 1
-                    self.cloud_only_metrics['latencies'].append(np.random.uniform(50, 150))
-            time.sleep(0.05)
+            # Çok hızlı döngü (Yoğun trafik simülasyonu için sleep çok az)
+            time.sleep(0.01) 
             
-        time.sleep(2)
-        for node in sensor_nodes: node.disconnect()
+        total_time = time.time() - start_time
+        print(f"\n✅ Senaryo Tamamlandı. Süre: {total_time:.2f} sn")
+        
+        # C. İstatistikleri Topla
+        if mode == 'edge':
+            stats = edge.get_statistics()
+            self.results['edge']['bandwidth'] = stats['cloud_messages_sent']
+            self.results['edge']['decisions'] = stats['local_decisions']
+            self.results['edge']['ai_anomalies'] = stats.get('ai_anomalies', 0)
+            edge.disconnect()
+        else:
+            # Cloud senaryosunda tüm veriler cloud'a gider
+            self.results['cloud']['bandwidth'] = processed_count
+            self.results['cloud']['decisions'] = 0 # Cloud'da yerel karar yok
+        
         cloud.disconnect()
-        return True
+        for s in sensors: s.disconnect()
+        time.sleep(2)
 
-    def generate_comparison_report(self):
+    def generate_report(self):
         print("\n" + "="*70)
-        print("FİNAL PERFORMANS RAPORU")
+        print("FİNAL PERFORMANS KARŞILAŞTIRMA RAPORU")
         print("="*70)
         
-        # Doğruluk Hesaplama
-        tp = self.accuracy_metrics['true_positives']
-        tn = self.accuracy_metrics['true_negatives']
-        fp = self.accuracy_metrics['false_positives']
-        fn = self.accuracy_metrics['false_negatives']
-        total_predictions = tp + tn + fp + fn
+        e_lat = np.mean(self.results['edge']['latency'])
+        c_lat = np.mean(self.results['cloud']['latency'])
         
-        accuracy = ((tp + tn) / total_predictions * 100) if total_predictions > 0 else 0
-        precision = (tp / (tp + fp) * 100) if (tp + fp) > 0 else 0
-        recall = (tp / (tp + fn) * 100) if (tp + fn) > 0 else 0
+        e_bw = self.results['edge']['bandwidth']
+        c_bw = self.results['cloud']['bandwidth']
         
-        print("\n1. YAPAY ZEKA DOĞRULUK ANALİZİ (Ground Truth: Health < 60)")
-        print("-" * 70)
-        print(f"Toplam İşlem:        {total_predictions}")
-        print(f"Doğru Tespitler:     {tp} (Gerçek Arıza)")
-        print(f"Yanlış Alarmlar:     {fp} (False Positive)")
-        print(f"Kaçırılan Arızalar:  {fn} (False Negative)")
-        print("-" * 70)
-        print(f" MODEL DOĞRULUĞU (ACCURACY):  %{accuracy:.2f}")
-        print(f" HASSASİYET (PRECISION):      %{precision:.2f}")
-        print(f" YAKALAMA (RECALL):           %{recall:.2f}")
+        print(f"\n1. HIZ (GECİKME)")
+        print(f"   Kenar Bilişim: {e_lat:.2f} ms")
+        print(f"   Bulut Bilişim: {c_lat:.2f} ms")
+        print(f"   --> Hız Artışı: %{((c_lat-e_lat)/c_lat)*100:.1f}")
+        
+        print(f"\n2. BANT GENİŞLİĞİ (Veri Tasarrufu)")
+        print(f"   Toplam Veri: {self.num_cycles}")
+        print(f"   Buluta Gönderilen (Edge):  {e_bw}")
+        print(f"   Buluta Gönderilen (Cloud): {c_bw}")
+        print(f"   --> Tasarruf: %{(1 - e_bw/c_bw)*100:.1f}")
+        
+        print(f"\n3. YAPAY ZEKA ETKİSİ")
+        print(f"   AI Tarafından Tespit Edilen Anomali: {self.results['edge'].get('ai_anomalies', 0)}")
+        print(f"   Yerel Otonom Karar Sayısı: {self.results['edge']['decisions']}")
+        
+        # Grafik
+        self.plot_results(e_lat, c_lat, e_bw, c_bw)
 
-        edge_avg = np.mean(self.edge_metrics['latencies'])
-        cloud_avg = np.mean(self.cloud_only_metrics['latencies'])
+    def plot_results(self, el, cl, eb, cb):
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
         
-        print("\n2. SİSTEM PERFORMANSI")
-        print("-" * 70)
-        print(f"Kenar Gecikmesi:     {edge_avg:.2f} ms")
-        print(f"Bulut Gecikmesi:     {cloud_avg:.2f} ms")
-        print(f"Veri Tasarrufu:      %{(1 - self.edge_metrics['data_sent_to_cloud']/self.edge_metrics['total_data_points'])*100:.1f}")
-        
-        return accuracy
-
-def main():
-    sim = MQTTSystemSimulation(num_cycles=30)
-    sim.simulate_edge_mqtt_architecture()
-    sim.simulate_cloud_only_mqtt()
-    sim.generate_comparison_report()
+        # Grafik 1: Gecikme
+        ax1.bar(['Edge (AI)', 'Cloud'], [el, cl], color=['#2ecc71', '#e74c3c'])
+        ax1.set_title('Ortalama Tepki Süresi (Düşük İyi)', fontsize=12)
+        ax1.set_ylabel('Milisaniye (ms)')
+        for i, v in enumerate([el, cl]):
+            ax1.text(i, v, f"{v:.1f}ms", ha='center', va='bottom', fontweight='bold')
+            
+        # Grafik 2: Bant Genişliği
+        ax2.bar(['Edge (AI)', 'Cloud'], [eb, cb], color=['#3498db', '#95a5a6'])
+        ax2.set_title('Buluta Gönderilen Veri Sayısı (Düşük İyi)', fontsize=12)
+        ax2.set_ylabel('Mesaj Adedi')
+        for i, v in enumerate([eb, cb]):
+            ax2.text(i, v, str(v), ha='center', va='bottom', fontweight='bold')
+            
+        plt.suptitle(f'Proje 10: Yoğun Yük Testi ({self.num_cycles} Veri Paketi)', fontsize=16)
+        plt.savefig('output/final_simulation_report.png')
+        print(f"\n[INFO] Grafik kaydedildi: output/final_simulation_report.png")
 
 if __name__ == "__main__":
-    main()
+    # 5000 veri paketi, 4 sensör ile simülasyonu başlat
+    sim = MQTTSystemSimulation(num_cycles=5000, num_sensors=4)
+    
+    # 1. Önce Edge Senaryosu
+    sim.run_scenario(mode='edge')
+    
+    # 2. Sonra Cloud Senaryosu
+    sim.run_scenario(mode='cloud')
+    
+    # 3. Raporla
+    sim.generate_report()
