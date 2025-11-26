@@ -1,12 +1,13 @@
 """
 10_protocol_comparison.py
- Final Analizi: Edge (MQTT) vs Cloud (MQTT) vs Cloud (HTTP)
- Canlı Veri Simülasyonu ile Uyumlu)
+ Edge (MQTT) vs Cloud (MQTT) vs Cloud (HTTP)
+(GELİŞMİŞ GÖRSELLEŞTİRME VERSİYONU: Boxplot, Dağılım ve Tasarruf Analizi)
 """
 
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 from mqtt_sensor_simulator import create_mqtt_sensors
 from mqtt_edge_device import MQTTEdgeDevice
 from mqtt_cloud_platform import CloudPlatform
@@ -18,25 +19,23 @@ class ProtocolSimulation:
         self.broker = 'broker.hivemq.com'
         self.port = 1883
         
-        # Sonuçlar (3 Farklı Senaryo)
+        # Sonuçlar
         self.results = {
             'edge_mqtt':  {'latency': [], 'bandwidth_bytes': 0, 'decisions': 0},
             'cloud_mqtt': {'latency': [], 'bandwidth_bytes': 0, 'decisions': 0},
             'cloud_http': {'latency': [], 'bandwidth_bytes': 0, 'decisions': 0}
         }
         
-        # Protokol Yükleri (Simülasyon Sabitleri)
-        self.MQTT_HEADER_SIZE = 50   # Byte (Yaklaşık)
-        self.HTTP_HEADER_SIZE = 500  # Byte (Yaklaşık - Headers, Cookies vb.)
-        self.PAYLOAD_SIZE = 250      # Byte (JSON verisi)
+        # Protokol Yükleri
+        self.MQTT_HEADER_SIZE = 50
+        self.HTTP_HEADER_SIZE = 500
+        self.PAYLOAD_SIZE = 250
 
     def run_edge_mqtt(self):
-        """Senaryo 1: Kenar Bilişim + MQTT"""
         print("\n" + "="*60)
         print("SENARYO 1: KENAR BİLİŞİM (AI + MQTT)")
         print("="*60)
         
-        # DÜZELTME BURADA: Artık sensor_data yok, sadece sensör sayısı veriyoruz
         nodes = create_mqtt_sensors(self.num_sensors, self.broker, self.port)
         edge = MQTTEdgeDevice()
         
@@ -45,157 +44,161 @@ class ProtocolSimulation:
         time.sleep(1)
         
         print(" Veri akışı başladı...")
-        
         processed_count = 0
-        # Kenar senaryosunda sadece ANOMALİLER buluta gider
         anomalies_sent = 0
         
-        # Simülasyon Döngüsü
         while processed_count < self.num_cycles:
             for node in nodes:
                 if processed_count >= self.num_cycles: break
                 
-                # Canlı veri üret ve gönder
                 if node.read_and_publish():
                     processed_count += 1
-                    
-                    # Gecikme: LAN (Hızlı) + Edge AI İşleme
+                    # Gecikme: LAN (2-8ms) + AI İşleme (3-6ms)
                     lat = np.random.uniform(2, 8) + np.random.uniform(3, 6)
                     self.results['edge_mqtt']['latency'].append(lat)
                     
-                    # Bant Genişliği: Sadece anomali varsa veri gider
-                    # Simülasyonda rastgele %5 anomali olduğunu varsayalım (AI'nın bulduğu)
+                    # Sadece anomali (%5 ihtimal) buluta gider
                     if np.random.random() < 0.05:
                         anomalies_sent += 1
-            
-            time.sleep(0.01) # Hızlı akış
+            time.sleep(0.001) # Hızlı simülasyon
                         
-        # Toplam Veri Trafiği = Gönderilen Anomali Sayısı * (Payload + MQTT Header)
         total_bytes = anomalies_sent * (self.PAYLOAD_SIZE + self.MQTT_HEADER_SIZE)
         self.results['edge_mqtt']['bandwidth_bytes'] = total_bytes
-        self.results['edge_mqtt']['decisions'] = processed_count # Her veriye karar verildi
         
         print(f"✅ Tamamlandı. Buluta giden paket: {anomalies_sent}/{processed_count}")
         edge.disconnect()
         for n in nodes: n.disconnect()
 
     def run_cloud_mqtt(self):
-        """Senaryo 2: Bulut + MQTT"""
         print("\n" + "="*60)
         print("SENARYO 2: BULUT MERKEZLİ (MQTT)")
         print("="*60)
         
         processed_count = 0
-        
-        # Simülasyon döngüsü
         for _ in range(self.num_cycles):
-            # Gecikme: İnternet (Orta) + Bulut İşleme
-            # MQTT bağlantısı sürekli açık olduğu için "Handshake" süresi yoktur
+            # Gecikme: İnternet (40-100ms) + Bulut İşleme (10-30ms)
             lat = np.random.uniform(40, 100) + np.random.uniform(10, 30)
             self.results['cloud_mqtt']['latency'].append(lat)
             processed_count += 1
             
-        # Bant Genişliği: Her veri paketi buluta gider
-        # Toplam = Tüm Mesajlar * (Payload + MQTT Header)
         total_bytes = processed_count * (self.PAYLOAD_SIZE + self.MQTT_HEADER_SIZE)
         self.results['cloud_mqtt']['bandwidth_bytes'] = total_bytes
         print(f"✅ Tamamlandı. Buluta giden paket: {processed_count}")
 
     def run_cloud_http(self):
-        """Senaryo 3: Bulut + HTTP (REST API)"""
         print("\n" + "="*60)
         print("SENARYO 3: BULUT MERKEZLİ (HTTP/REST)")
         print("="*60)
-        print(" HTTP Handshake ve Header yükü simüle ediliyor...")
         
         processed_count = 0
-        
         for _ in range(self.num_cycles):
-            # Gecikme: İnternet + TCP Handshake (HTTP her istekte yeni bağlantı açabilir) + Bulut
-            # HTTP, MQTT'ye göre bağlantı kurma maliyeti (overhead) ekler (+20-50ms)
-            http_handshake = np.random.uniform(20, 50)
-            network_lat = np.random.uniform(40, 100)
-            cloud_proc = np.random.uniform(10, 30)
-            
-            total_lat = http_handshake + network_lat + cloud_proc
-            self.results['cloud_http']['latency'].append(total_lat)
+            # Gecikme: Handshake (20-50ms) + İnternet + Bulut
+            lat = np.random.uniform(20, 40) + np.random.uniform(40, 80) + np.random.uniform(10, 30)
+            self.results['cloud_http']['latency'].append(lat)
             processed_count += 1
             
-        # Bant Genişliği: Her veri paketi buluta gider
-        # HTTP Headerları metin tabanlıdır ve çok yer kaplar
-        # Toplam = Tüm Mesajlar * (Payload + HTTP Header)
         total_bytes = processed_count * (self.PAYLOAD_SIZE + self.HTTP_HEADER_SIZE)
         self.results['cloud_http']['bandwidth_bytes'] = total_bytes
         print(f"✅ Tamamlandı. Buluta giden paket: {processed_count}")
 
     def generate_report(self):
         print("\n" + "="*70)
-        print(f"{'FİNAL PROTOKOL VE MİMARİ KARŞILAŞTIRMASI':^70}")
+        print(f"{'FİNAL GÖRSELLEŞTİRME VE RAPOR':^70}")
         print("="*70)
         
-        metrics = {
-            'Edge (AI+MQTT)': self.results['edge_mqtt'],
-            'Cloud (MQTT)': self.results['cloud_mqtt'],
-            'Cloud (HTTP)': self.results['cloud_http']
-        }
-        
-        print(f"{'SENARYO':<20} | {'GECİKME (Ort)':<15} | {'VERİ TRAFİĞİ (KB)':<20} | {'VERİMLİLİK'}")
-        print("-" * 80)
-        
-        edge_bw = metrics['Edge (AI+MQTT)']['bandwidth_bytes']
-        
-        for name, data in metrics.items():
-            lat = np.mean(data['latency'])
-            bw_kb = data['bandwidth_bytes'] / 1024 # KB cinsinden
-            
-            # Verimlilik (Edge'e göre ne kadar kötü?)
-            efficiency = "EN İYİ 🏆"
-            if bw_kb > (edge_bw / 1024) and edge_bw > 0:
-                kat = data['bandwidth_bytes'] / edge_bw
-                efficiency = f"{kat:.1f}x daha fazla veri"
-            elif edge_bw == 0:
-                 efficiency = "Veri yok"
-            
-            print(f"{name:<20} | {lat:.2f} ms {'⚡':<7} | {bw_kb:.2f} KB {'':<11} | {efficiency}")
-            
-        self.plot_charts(metrics)
+        self.plot_advanced_charts()
 
-    def plot_charts(self, metrics):
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    def plot_advanced_charts(self):
+        """4'lü Gelişmiş Grafik Paneli"""
+        print("\nGrafikler oluşturuluyor...")
         
-        names = list(metrics.keys())
-        latencies = [np.mean(m['latency']) for m in metrics.values()]
-        bandwidths = [m['bandwidth_bytes'] / 1024 for m in metrics.values()] 
+        # Verileri hazırla
+        scenarios = ['Edge (MQTT)', 'Cloud (MQTT)', 'Cloud (HTTP)']
+        colors = ['#3498db', '#9b59b6', '#1abc9c'] 
         
-        colors = ['#2ecc71', '#f1c40f', '#e74c3c'] 
+        lat_data = [
+            self.results['edge_mqtt']['latency'],
+            self.results['cloud_mqtt']['latency'],
+            self.results['cloud_http']['latency']
+        ]
         
-        # Grafik 1: Gecikme
-        bars1 = ax1.bar(names, latencies, color=colors)
-        ax1.set_title('Ortalama Tepki Süresi (Düşük İyi)')
-        ax1.set_ylabel('Milisaniye (ms)')
-        ax1.grid(axis='y', alpha=0.3)
-        for bar in bars1:
-            height = bar.get_height()
-            ax1.text(bar.get_x() + bar.get_width()/2., height,
-                    f'{height:.1f}ms', ha='center', va='bottom', fontweight='bold')
+        bw_data = [
+            self.results['edge_mqtt']['bandwidth_bytes'] / 1024,
+            self.results['cloud_mqtt']['bandwidth_bytes'] / 1024,
+            self.results['cloud_http']['bandwidth_bytes'] / 1024
+        ]
+        
+        # HTTP'yi baz alarak tasarruf oranı hesapla
+        base_bw = self.results['cloud_http']['bandwidth_bytes']
+        savings = [
+            (1 - (self.results['edge_mqtt']['bandwidth_bytes'] / base_bw)) * 100,
+            (1 - (self.results['cloud_mqtt']['bandwidth_bytes'] / base_bw)) * 100,
+            0.0
+        ]
 
-        # Grafik 2: Bant Genişliği
-        bars2 = ax2.bar(names, bandwidths, color=colors)
-        ax2.set_title('Ağ Trafiği Tüketimi (Düşük İyi)')
-        ax2.set_ylabel('Veri Boyutu (KB)')
-        ax2.grid(axis='y', alpha=0.3)
+        # Çizim Alanı (2x2 Grid)
+        fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+        plt.subplots_adjust(hspace=0.3, wspace=0.2)
+        
+        # 1. Gecikme Dağılımı (Boxplot) - EN ÖNEMLİ GRAFİK
+        # Bu grafik min, max, medyan ve aykırı değerleri gösterir
+        ax1 = axes[0, 0]
+        bp = ax1.boxplot(lat_data, labels=scenarios, patch_artist=True, vert=True)
+        
+        # Renklendirme
+        for patch, color in zip(bp['boxes'], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.7)
+            
+        ax1.set_title('Gecikme Dağılımı ve Kararlılık (Boxplot)', fontweight='bold')
+        ax1.set_ylabel('Gecikme (ms)')
+        ax1.grid(True, alpha=0.3, axis='y')
+        
+        # 2. Ortalama Gecikme (Bar Chart)
+        ax2 = axes[0, 1]
+        avg_lats = [np.mean(l) for l in lat_data]
+        bars2 = ax2.bar(scenarios, avg_lats, color=colors, alpha=0.8)
+        ax2.set_title('Ortalama Tepki Süresi', fontweight='bold')
+        ax2.set_ylabel('Milisaniye (ms)')
         for bar in bars2:
             height = bar.get_height()
             ax2.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}ms', ha='center', va='bottom', fontweight='bold')
+
+        # 3. Bant Genişliği Kullanımı (Bar Chart)
+        ax3 = axes[1, 0]
+        bars3 = ax3.bar(scenarios, bw_data, color=colors, alpha=0.8)
+        ax3.set_title('Toplam Veri Kullanımı (KB)', fontweight='bold')
+        ax3.set_ylabel('Kilobyte (KB)')
+        for bar in bars3:
+            height = bar.get_height()
+            ax3.text(bar.get_x() + bar.get_width()/2., height,
                     f'{height:.1f}KB', ha='center', va='bottom', fontweight='bold')
 
-        plt.suptitle(f' Protokol ve Mimari Karşılaştırması ({self.num_cycles} Veri Paketi)', fontsize=16)
-        plt.tight_layout()
-        plt.savefig('output/protocol_comparison_report.png')
-        print(f"\n[INFO] Grafik kaydedildi: output/protocol_comparison_report.png")
+        # 4. Veri Tasarrufu Oranı (Bar Chart)
+        ax4 = axes[1, 1]
+        # Renkleri tasarruf için tersine çevir (Edge en iyi)
+        save_colors = ['#27ae60', '#f39c12', '#95a5a6'] 
+        bars4 = ax4.bar(scenarios, savings, color=save_colors, alpha=0.8)
+        ax4.set_title('Cloud(HTTP) Senaryosuna Göre Veri Tasarrufu (%)', fontweight='bold')
+        ax4.set_ylabel('Tasarruf Oranı (%)')
+        ax4.set_ylim(0, 110)
+        for bar in bars4:
+            height = bar.get_height()
+            ax4.text(bar.get_x() + bar.get_width()/2., height,
+                    f'%{height:.1f}', ha='center', va='bottom', fontweight='bold')
+
+        # Genel Başlık
+        plt.suptitle(f' Kapsamlı Performans Analizi ({self.num_cycles} Veri Paketi)', 
+                    fontsize=16, fontweight='bold')
+        
+        output_file = 'output/comprehensive_analysis.png'
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"✓ Gelişmiş grafik paketi kaydedildi: {output_file}")
+        plt.close()
 
 if __name__ == "__main__":
-    sim = ProtocolSimulation(num_cycles=1000, num_sensors=4)
+    sim = ProtocolSimulation(num_cycles=2000, num_sensors=4)
     
     sim.run_edge_mqtt()
     sim.run_cloud_mqtt()
