@@ -150,7 +150,7 @@ class MQTTSystemSimulation:
         for i, v in enumerate([eb, cb]):
             ax2.text(i, v, str(v), ha='center', va='bottom', fontweight='bold')
             
-        plt.suptitle(f'Proje 10: Yoğun Yük Testi ({self.num_cycles} Veri Paketi)', fontsize=16)
+        plt.suptitle(f' Yoğun Yük Testi ({self.num_cycles} Veri Paketi)', fontsize=16)
         plt.savefig('output/final_simulation_report.png')
         print(f"\n[INFO] Grafik kaydedildi: output/final_simulation_report.png")
 
@@ -158,11 +158,8 @@ if __name__ == "__main__":
     # 5000 veri paketi, 4 sensör ile simülasyonu başlat
     sim = MQTTSystemSimulation(num_cycles=5000, num_sensors=4)
     
-    # 1. Önce Edge Senaryosu
     sim.run_scenario(mode='edge')
     
-    # 2. Sonra Cloud Senaryosu
     sim.run_scenario(mode='cloud')
     
-    # 3. Raporla
     sim.generate_report()
