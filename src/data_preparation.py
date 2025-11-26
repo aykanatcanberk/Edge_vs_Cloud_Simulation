@@ -26,7 +26,7 @@ def generate_turbofan_data():
     # Parametreler
     num_engines = 4
     num_cycles = 2500         # ≈ 10.000 veri
-    # num_cycles = 5000       # ≈ 20.000 veri (istersen bunu aç)
+    # num_cycles = 5000       # ≈ 20.000 veri 
 
     data_list = []
     
@@ -138,10 +138,6 @@ def main():
     analyze_data(df)
     visualize_data(df)
     
-    print("\n" + "="*70)
-    print("✓ ADIM 1 TAMAMLANDI")
-    print("="*70)
-    print("\nSonraki adım: python src/iot_sensor_simulator.py\n")
-
 if __name__ == "__main__":
     main()
+
