@@ -1,7 +1,7 @@
 """
 06_mqtt_edge_device.py
-Yapay Zeka Destekli Kenar Bilişim Cihazı (DÜZELTİLMİŞ VERSİYON)
-Proje 10: Yerel İşleme ve Otonom Karar Mekanizması
+Yapay Zeka Destekli Kenar Bilişim Cihazı 
+Yerel İşleme ve Otonom Karar Mekanizması
 """
 
 import json
@@ -50,7 +50,6 @@ class MQTTEdgeDevice:
     def load_ai_brain(self):
         """Eğitilmiş makine öğrenmesi modelini yükler"""
         try:
-            # Model dosya yolu kontrolü 
             model_path = 'models/anomaly_detector.pkl'
             if not os.path.exists(model_path):
                 model_path = '../models/anomaly_detector.pkl'
